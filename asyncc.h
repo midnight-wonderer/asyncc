@@ -130,6 +130,8 @@ enum async {
 #endif
 
 #define async_done(s) SPOT(s) = ASYNC_DONE
+#define async_is_done(s) (SPOT(s) == ASYNC_DONE)
+#define async_call(f, s) (async_is_done(s) || (f)(s))
 
 // Gets the 8-bit stack value for printing
 #define SVAL(s,idx) *((uint8_t*)s+idx)
@@ -159,5 +161,18 @@ enum async {
     }
     
 
+
+// Counting semaphores support (ported from async.h)
+struct async_sem {
+    unsigned int count;
+};
+
+#define async_sem_init(sem, val) (sem)->count = (val)
+#define await_sem(sem)           \
+    do {                         \
+        await((sem)->count > 0); \
+        --(sem)->count;          \
+    } while (0)
+#define async_sem_signal(sem)    ++(sem)->count
 
 #endif // ASYNCC_H
