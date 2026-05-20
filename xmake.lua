@@ -20,11 +20,11 @@ target("example_async")
         local gendir = path.join(projectdir, "build", "generated")
         os.mkdir(gendir)
         
-        -- Find all .async files in examples/
-        local async_files = os.files(path.join(projectdir, "examples", "*.async"))
+        -- Find all .asyncc.c files in examples/
+        local async_files = os.files(path.join(projectdir, "examples", "*.asyncc.c"))
         for _, async_file in ipairs(async_files) do
             local filename = path.filename(async_file)
-            local c_file = path.join(gendir, (filename:gsub("%.async$", ".c")))
+            local c_file = path.join(gendir, (filename:gsub("%.asyncc%.c$", ".c")))
             
             -- Run the Python preprocessor
             os.runv("python3", {

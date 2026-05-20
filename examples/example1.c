@@ -32,36 +32,36 @@
 #define print_stack(x)
 
 uint16_t error_state;
-void async_err(uint8_t *s, uint16_t locals_size)
+void asyncc_err(uint8_t *s, uint16_t locals_size)
 {
     printf("Error: %d\n", locals_size);
 }
 
-enum async bfunc(uint8_t *s, int repeat)
+enum asyncc_state bfunc(uint8_t *s, int repeat)
 {
     print_stack(s);
-    async_begin(s, uint16_t i);
+    asyncc_begin(s, uint16_t i);
     print_stack(s);
 
     // _() macro is an option if you don't like l-> syntax for locals
     for(_(i)=0; _(i)<repeat; _(i)++) {
         printf("bfunc %d: %d\n", repeat, _(i));
-        async_yield;
+        asyncc_yield;
     }
 
-    async_end(s);
+    asyncc_end(s);
 }
 
-enum async afunc(uint8_t *s)
+enum asyncc_state afunc(uint8_t *s)
 {
     print_stack(s);
-    async_begin(s, uint16_t i, uint8_t s1[3][8]);
+    asyncc_begin(s, uint16_t i, uint8_t s1[3][8]);
     _(i) = 42;
     print_stack(s);
 
-    async_init(l->s1[0], 8);
-    async_init(l->s1[1], 8);
-    async_init(l->s1[2], 8);
+    asyncc_init(l->s1[0], 8);
+    asyncc_init(l->s1[1], 8);
+    asyncc_init(l->s1[2], 8);
     print_stack(l->s1[0]);
     print_stack(l->s1[1]);
     print_stack(l->s1[2]);
@@ -70,7 +70,7 @@ enum async afunc(uint8_t *s)
 
     DOING(await(bfunc(l->s1[0], 1) & bfunc(l->s1[1], 2) & bfunc(l->s1[2], 3)));
 
-    async_end(s);
+    asyncc_end(s);
 }
 
 int main(void)
@@ -78,14 +78,13 @@ int main(void)
     uint8_t stack[64];
     uint8_t *s = stack;
 
-    async_init(s, 64);
+    asyncc_init(s, 64);
     print_stack(s);
 
-    enum async status = ASYNC_INIT;
-    while (status != ASYNC_DONE) {
+    enum asyncc_state status = ASYNCC_INIT;
+    while (status != ASYNCC_DONE) {
         DOING(status = afunc(s));
     }
 
     printf("Done!\n");
 }
-

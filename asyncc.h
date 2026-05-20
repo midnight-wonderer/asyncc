@@ -29,8 +29,12 @@
 #define ASYNCC_VERSION_MINOR    0
 #define ASYNCC_VERSION_PATCH    1
 
+// This macro is used as a decorator/marker for the preprocessor,
+// and resolves to nothing during normal compilation.
+#define asyncc
+
 // This magic is used to allow a nice declaration of local variables in the
-// ASYNC_BEGIN() macro (up to 10 locals, which is a reasonable limit and
+// ASYNCC_BEGIN() macro (up to 10 locals, which is a reasonable limit and
 // can be easily extended with some modifications)
 #define FE_0(ACTION)
 #define FE_1(ACTION, X) ACTION(X) 
@@ -52,11 +56,11 @@
 #define L_DEFINE(X)     X;
 #define L_DEFINES(...) FOR_EACH(L_DEFINE,__VA_ARGS__)
 
-enum async {
-    ASYNC_INIT,
-    ASYNC_CONT = ASYNC_INIT,
-    ASYNC_ERR,
-    ASYNC_DONE,
+enum asyncc_state {
+    ASYNCC_INIT,
+    ASYNCC_CONT = ASYNCC_INIT,
+    ASYNCC_ERR,
+    ASYNCC_DONE,
 };
 
 // IDEA: provide a #define to disable all stack bounds checking (scary)
@@ -67,54 +71,54 @@ enum async {
 #ifdef LIVE_DANGEROUSLY
 
 // Init stack index and initial spot within function (no len, live dangerously)
-#define async_init(s, len)              \
+#define asyncc_init(s, len)              \
         *((uint16_t*)s+0) = 2;          \
-        *((uint16_t*)s+1) = ASYNC_INIT
+        *((uint16_t*)s+1) = ASYNCC_INIT
 
-#define ASYNC_BEGIN(s, ...)                                         \
+#define ASYNCC_BEGIN(s, ...)                                         \
     uint16_t *s_idx = (uint16_t*)(s);                               \
     struct locals { L_DEFINES(uint16_t spot, __VA_ARGS__) } *l;     \
     l = (struct locals*)(s + *s_idx);                               \
     *s_idx += sizeof(struct locals);                                \
     switch (l->spot) { default:
 
-#define async_begin(s, ...) ASYNC_BEGIN(s, __VA_ARGS__)
+#define asyncc_begin(s, ...) ASYNCC_BEGIN(s, __VA_ARGS__)
 
 #else
 
 // Init stack index, max length, and initial spot within function
-#define async_init(s, len)              \
+#define asyncc_init(s, len)              \
         *((uint16_t*)s+0) = 4;          \
         *((uint16_t*)s+1) = len;        \
-        *((uint16_t*)s+2) = ASYNC_INIT
+        *((uint16_t*)s+2) = ASYNCC_INIT
 
-#define async_begin(s, ...)                                         \
+#define asyncc_begin(s, ...)                                         \
     uint16_t *s_idx = (uint16_t*)(s);                               \
     uint16_t *s_max = (uint16_t*)(s)+1;                             \
     struct locals { L_DEFINES(uint16_t spot, __VA_ARGS__) } *l;     \
     if ((*s_idx + sizeof(struct locals)) > *s_max) {                \
-        async_err(s, sizeof(struct locals));                        \
-        return ASYNC_ERR;                                           \
+        asyncc_err(s, sizeof(struct locals));                        \
+        return ASYNCC_ERR;                                           \
     } else {                                                        \
         l = (struct locals*)(s + *s_idx);                           \
         a_push();                                                   \
         switch (l->spot) { default:
 
-#define ASYNC_BEGIN(s, ...) async_begin(s, __VA_ARGS__)
+#define ASYNCC_BEGIN(s, ...) asyncc_begin(s, __VA_ARGS__)
 
 #endif
 
 #define a_push() *s_idx+=sizeof(struct locals)
 #define a_pop()  *s_idx-=sizeof(struct locals)
 
-#define async_end(s) case ASYNC_DONE: a_pop(); return ASYNC_DONE; } }
+#define asyncc_end(s) case ASYNCC_DONE: a_pop(); return ASYNCC_DONE; } }
 
-#define await_while(cond) l->spot = __LINE__; case __LINE__:if (cond) { a_pop(); return ASYNC_CONT; }
+#define await_while(cond) l->spot = __LINE__; case __LINE__:if (cond) { a_pop(); return ASYNCC_CONT; }
 #define await(cond) await_while(!(cond))
 
 
-#define async_yield l->spot = __LINE__; a_pop(); return ASYNC_CONT; case __LINE__:
-#define async_exit l->spot = ASYNC_DONE; a_pop(); return ASYNC_DONE
+#define asyncc_yield l->spot = __LINE__; a_pop(); return ASYNCC_CONT; case __LINE__:
+#define asyncc_exit l->spot = ASYNCC_DONE; a_pop(); return ASYNCC_DONE
 
 // For those who don't like dereferencing struct members so much:
 #define _(v) l->v
@@ -129,9 +133,9 @@ enum async {
 #define SPOT(s) *((uint16_t*)s+2)
 #endif
 
-#define async_done(s) SPOT(s) = ASYNC_DONE
-#define async_is_done(s) (SPOT(s) == ASYNC_DONE)
-#define async_call(f, s) (async_is_done(s) || (f)(s))
+#define asyncc_done(s) SPOT(s) = ASYNCC_DONE
+#define asyncc_is_done(s) (SPOT(s) == ASYNCC_DONE)
+#define asyncc_call(f, s) (asyncc_is_done(s) || (f)(s))
 
 // Gets the 8-bit stack value for printing
 #define SVAL(s,idx) *((uint8_t*)s+idx)
@@ -159,20 +163,20 @@ enum async {
         }                                                           \
         printf("\n");                                               \
     }
-    
 
 
-// Counting semaphores support (ported from async.h)
-struct async_sem {
+
+// Counting semaphores support
+struct asyncc_sem {
     unsigned int count;
 };
 
-#define async_sem_init(sem, val) (sem)->count = (val)
+#define asyncc_sem_init(sem, val) (sem)->count = (val)
 #define await_sem(sem)           \
     do {                         \
         await((sem)->count > 0); \
         --(sem)->count;          \
     } while (0)
-#define async_sem_signal(sem)    ++(sem)->count
+#define asyncc_sem_signal(sem)    ++(sem)->count
 
 #endif // ASYNCC_H

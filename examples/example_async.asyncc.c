@@ -2,23 +2,23 @@
 #include <stdio.h>
 #include "asyncc.h"
 
-void async_err(uint8_t *s, uint16_t locals_size) {
+void asyncc_err(uint8_t *s, uint16_t locals_size) {
     (void)s;
     printf("Stack overflow: %d\n", locals_size);
 }
 
-async enum async bfunc(uint8_t *s, int repeat)
+asyncc enum asyncc_state bfunc(uint8_t *s, int repeat)
 {
     uint16_t i = 0;
 
-    async_begin;
+    asyncc_begin;
 
     for (i = 0; i < repeat; i++) {
         printf("bfunc: %d\n", i);
-        async_yield;
+        asyncc_yield;
     }
 
-    async_end;
+    asyncc_end;
 }
 
 int main(void)
@@ -26,10 +26,10 @@ int main(void)
     uint8_t stack[64];
     uint8_t *s = stack;
 
-    async_init(s, 64);
+    asyncc_init(s, 64);
 
-    enum async status = ASYNC_INIT;
-    while (status != ASYNC_DONE) {
+    enum asyncc_state status = ASYNCC_INIT;
+    while (status != ASYNCC_DONE) {
         status = bfunc(s, 5);
     }
 
