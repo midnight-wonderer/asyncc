@@ -206,184 +206,22 @@ bool asyncc_chan_try_write(asyncc_chan_t *chan, void *val_ptr, size_t val_size);
 // -------------------------------------------------------------
 // Select Case (Waiting on multiple channels)
 // -------------------------------------------------------------
-#define asyncc_select_read2(ch1, val1, ch2, val2)                              \
-  do {                                                                         \
-    asyncc_chan_t *_c1 = (ch1);                                                \
-    asyncc_chan_t *_c2 = (ch2);                                                \
-    if (asyncc_chan_try_read(_c1, val1, sizeof(*(val1)))) {                    \
-      l->task.woken_by = _c1;                                                  \
-    } else if (asyncc_chan_try_read(_c2, val2, sizeof(*(val2)))) {             \
-      l->task.woken_by = _c2;                                                  \
-    } else {                                                                   \
-      _c1->waiting_reader = (asyncc_task_t *)l;                                \
-      _c1->data_ptr = (void *)(val1);                                          \
-      _c2->waiting_reader = (asyncc_task_t *)l;                                \
-      _c2->data_ptr = (void *)(val2);                                          \
-      l->task.blocked = true;                                                  \
-      asyncc_yield;                                                            \
-      if (l->task.woken_by == _c1) {                                           \
-        _c2->waiting_reader = NULL;                                            \
-      } else if (l->task.woken_by == _c2) {                                    \
-        _c1->waiting_reader = NULL;                                            \
-      } else {                                                                 \
-        _c1->waiting_reader = NULL;                                            \
-        _c2->waiting_reader = NULL;                                            \
-      }                                                                        \
-    }                                                                          \
-  } while (0)
-
-#define asyncc_select_read3(ch1, val1, ch2, val2, ch3, val3)                   \
-  do {                                                                         \
-    asyncc_chan_t *_c1 = (ch1);                                                \
-    asyncc_chan_t *_c2 = (ch2);                                                \
-    asyncc_chan_t *_c3 = (ch3);                                                \
-    if (asyncc_chan_try_read(_c1, val1, sizeof(*(val1)))) {                    \
-      l->task.woken_by = _c1;                                                  \
-    } else if (asyncc_chan_try_read(_c2, val2, sizeof(*(val2)))) {             \
-      l->task.woken_by = _c2;                                                  \
-    } else if (asyncc_chan_try_read(_c3, val3, sizeof(*(val3)))) {             \
-      l->task.woken_by = _c3;                                                  \
-    } else {                                                                   \
-      _c1->waiting_reader = (asyncc_task_t *)l;                                \
-      _c1->data_ptr = (void *)(val1);                                          \
-      _c2->waiting_reader = (asyncc_task_t *)l;                                \
-      _c2->data_ptr = (void *)(val2);                                          \
-      _c3->waiting_reader = (asyncc_task_t *)l;                                \
-      _c3->data_ptr = (void *)(val3);                                          \
-      l->task.blocked = true;                                                  \
-      asyncc_yield;                                                            \
-      if (l->task.woken_by == _c1) {                                           \
-        _c2->waiting_reader = NULL;                                            \
-        _c3->waiting_reader = NULL;                                            \
-      } else if (l->task.woken_by == _c2) {                                    \
-        _c1->waiting_reader = NULL;                                            \
-        _c3->waiting_reader = NULL;                                            \
-      } else if (l->task.woken_by == _c3) {                                    \
-        _c1->waiting_reader = NULL;                                            \
-        _c2->waiting_reader = NULL;                                            \
-      } else {                                                                 \
-        _c1->waiting_reader = NULL;                                            \
-        _c2->waiting_reader = NULL;                                            \
-        _c3->waiting_reader = NULL;                                            \
-      }                                                                        \
-    }                                                                          \
-  } while (0)
-
-#define asyncc_select_read4(ch1, val1, ch2, val2, ch3, val3, ch4, val4)        \
-  do {                                                                         \
-    asyncc_chan_t *_c1 = (ch1);                                                \
-    asyncc_chan_t *_c2 = (ch2);                                                \
-    asyncc_chan_t *_c3 = (ch3);                                                \
-    asyncc_chan_t *_c4 = (ch4);                                                \
-    if (asyncc_chan_try_read(_c1, val1, sizeof(*(val1)))) {                    \
-      l->task.woken_by = _c1;                                                  \
-    } else if (asyncc_chan_try_read(_c2, val2, sizeof(*(val2)))) {             \
-      l->task.woken_by = _c2;                                                  \
-    } else if (asyncc_chan_try_read(_c3, val3, sizeof(*(val3)))) {             \
-      l->task.woken_by = _c3;                                                  \
-    } else if (asyncc_chan_try_read(_c4, val4, sizeof(*(val4)))) {             \
-      l->task.woken_by = _c4;                                                  \
-    } else {                                                                   \
-      _c1->waiting_reader = (asyncc_task_t *)l;                                \
-      _c1->data_ptr = (void *)(val1);                                          \
-      _c2->waiting_reader = (asyncc_task_t *)l;                                \
-      _c2->data_ptr = (void *)(val2);                                          \
-      _c3->waiting_reader = (asyncc_task_t *)l;                                \
-      _c3->data_ptr = (void *)(val3);                                          \
-      _c4->waiting_reader = (asyncc_task_t *)l;                                \
-      _c4->data_ptr = (void *)(val4);                                          \
-      l->task.blocked = true;                                                  \
-      asyncc_yield;                                                            \
-      if (l->task.woken_by == _c1) {                                           \
-        _c2->waiting_reader = NULL;                                            \
-        _c3->waiting_reader = NULL;                                            \
-        _c4->waiting_reader = NULL;                                            \
-      } else if (l->task.woken_by == _c2) {                                    \
-        _c1->waiting_reader = NULL;                                            \
-        _c3->waiting_reader = NULL;                                            \
-        _c4->waiting_reader = NULL;                                            \
-      } else if (l->task.woken_by == _c3) {                                    \
-        _c1->waiting_reader = NULL;                                            \
-        _c2->waiting_reader = NULL;                                            \
-        _c4->waiting_reader = NULL;                                            \
-      } else if (l->task.woken_by == _c4) {                                    \
-        _c1->waiting_reader = NULL;                                            \
-        _c2->waiting_reader = NULL;                                            \
-        _c3->waiting_reader = NULL;                                            \
-      } else {                                                                 \
-        _c1->waiting_reader = NULL;                                            \
-        _c2->waiting_reader = NULL;                                            \
-        _c3->waiting_reader = NULL;                                            \
-        _c4->waiting_reader = NULL;                                            \
-      }                                                                        \
-    }                                                                          \
-  } while (0)
-
-#define asyncc_select_read5(ch1, val1, ch2, val2, ch3, val3, ch4, val4, ch5,   \
-                            val5)                                              \
-  do {                                                                         \
-    asyncc_chan_t *_c1 = (ch1);                                                \
-    asyncc_chan_t *_c2 = (ch2);                                                \
-    asyncc_chan_t *_c3 = (ch3);                                                \
-    asyncc_chan_t *_c4 = (ch4);                                                \
-    asyncc_chan_t *_c5 = (ch5);                                                \
-    if (asyncc_chan_try_read(_c1, val1, sizeof(*(val1)))) {                    \
-      l->task.woken_by = _c1;                                                  \
-    } else if (asyncc_chan_try_read(_c2, val2, sizeof(*(val2)))) {             \
-      l->task.woken_by = _c2;                                                  \
-    } else if (asyncc_chan_try_read(_c3, val3, sizeof(*(val3)))) {             \
-      l->task.woken_by = _c3;                                                  \
-    } else if (asyncc_chan_try_read(_c4, val4, sizeof(*(val4)))) {             \
-      l->task.woken_by = _c4;                                                  \
-    } else if (asyncc_chan_try_read(_c5, val5, sizeof(*(val5)))) {             \
-      l->task.woken_by = _c5;                                                  \
-    } else {                                                                   \
-      _c1->waiting_reader = (asyncc_task_t *)l;                                \
-      _c1->data_ptr = (void *)(val1);                                          \
-      _c2->waiting_reader = (asyncc_task_t *)l;                                \
-      _c2->data_ptr = (void *)(val2);                                          \
-      _c3->waiting_reader = (asyncc_task_t *)l;                                \
-      _c3->data_ptr = (void *)(val3);                                          \
-      _c4->waiting_reader = (asyncc_task_t *)l;                                \
-      _c4->data_ptr = (void *)(val4);                                          \
-      _c5->waiting_reader = (asyncc_task_t *)l;                                \
-      _c5->data_ptr = (void *)(val5);                                          \
-      l->task.blocked = true;                                                  \
-      asyncc_yield;                                                            \
-      if (l->task.woken_by == _c1) {                                           \
-        _c2->waiting_reader = NULL;                                            \
-        _c3->waiting_reader = NULL;                                            \
-        _c4->waiting_reader = NULL;                                            \
-        _c5->waiting_reader = NULL;                                            \
-      } else if (l->task.woken_by == _c2) {                                    \
-        _c1->waiting_reader = NULL;                                            \
-        _c3->waiting_reader = NULL;                                            \
-        _c4->waiting_reader = NULL;                                            \
-        _c5->waiting_reader = NULL;                                            \
-      } else if (l->task.woken_by == _c3) {                                    \
-        _c1->waiting_reader = NULL;                                            \
-        _c2->waiting_reader = NULL;                                            \
-        _c4->waiting_reader = NULL;                                            \
-        _c5->waiting_reader = NULL;                                            \
-      } else if (l->task.woken_by == _c4) {                                    \
-        _c1->waiting_reader = NULL;                                            \
-        _c2->waiting_reader = NULL;                                            \
-        _c3->waiting_reader = NULL;                                            \
-        _c5->waiting_reader = NULL;                                            \
-      } else if (l->task.woken_by == _c5) {                                    \
-        _c1->waiting_reader = NULL;                                            \
-        _c2->waiting_reader = NULL;                                            \
-        _c3->waiting_reader = NULL;                                            \
-        _c4->waiting_reader = NULL;                                            \
-      } else {                                                                 \
-        _c1->waiting_reader = NULL;                                            \
-        _c2->waiting_reader = NULL;                                            \
-        _c3->waiting_reader = NULL;                                            \
-        _c4->waiting_reader = NULL;                                            \
-        _c5->waiting_reader = NULL;                                            \
-      }                                                                        \
-    }                                                                          \
-  } while (0)
+#define asyncc_select_read(...) ((void)0)
+#define asyncc_select_read2(...) ((void)0)
+#define asyncc_select_read3(...) ((void)0)
+#define asyncc_select_read4(...) ((void)0)
+#define asyncc_select_read5(...) ((void)0)
+#define asyncc_select_read6(...) ((void)0)
+#define asyncc_select_read7(...) ((void)0)
+#define asyncc_select_read8(...) ((void)0)
+#define asyncc_select_read9(...) ((void)0)
+#define asyncc_select_read10(...) ((void)0)
+#define asyncc_select_read11(...) ((void)0)
+#define asyncc_select_read12(...) ((void)0)
+#define asyncc_select_read13(...) ((void)0)
+#define asyncc_select_read14(...) ((void)0)
+#define asyncc_select_read15(...) ((void)0)
+#define asyncc_select_read16(...) ((void)0)
 
 // -------------------------------------------------------------
 // Thread Gate (Inter-Thread Communication Integration hooks)

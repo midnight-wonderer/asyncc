@@ -39,7 +39,7 @@ asyncc asyncc_state_t receiver(void)
 
     for (count = 0; count < 3; count++) {
         printf("Receiver: waiting on select (ch1 or ch2)...\n");
-        asyncc_select_read2(&ch1, &val1, &ch2, &val2);
+        asyncc_select_read(&ch1, &val1, &ch2, &val2);
 
         if (l->task.woken_by == &ch1) {
             printf("Receiver: received %d from ch1\n", val1);

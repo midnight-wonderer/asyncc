@@ -2,6 +2,7 @@
 import sys
 import re
 from pycparser import c_parser, c_ast, c_generator
+from jinja2 import Template
 
 def strip_comments_preserving_lines(text):
     def replacer(match):
@@ -75,6 +76,97 @@ def parse_with_auto_typedefs(code_to_parse):
                 raise e
 
             custom_types.add(candidate)
+
+SELECT_TEMPLATE = """\
+do {
+{% for chan in chan_strs %}
+    asyncc_chan_t *_c{{ loop.index }} = {{ chan }};
+{% endfor %}
+
+{% for val in val_strs %}
+    {% if loop.first %}
+    if (asyncc_chan_try_read(_c{{ loop.index }}, {{ val }}, sizeof(*({{ val }})))) {
+    {% else %}
+    } else if (asyncc_chan_try_read(_c{{ loop.index }}, {{ val }}, sizeof(*({{ val }})))) {
+    {% endif %}
+        l->task.woken_by = _c{{ loop.index }};
+{% endfor %}
+    } else {
+{% for val in val_strs %}
+        _c{{ loop.index }}->waiting_reader = (asyncc_task_t *)l;
+        _c{{ loop.index }}->data_ptr = (void *)({{ val }});
+{% endfor %}
+        l->task.blocked = true;
+        asyncc_yield;
+
+{% for val in val_strs %}
+    {% set outer_loop = loop %}
+    {% if loop.first %}
+        if (l->task.woken_by == _c{{ loop.index }}) {
+    {% else %}
+        } else if (l->task.woken_by == _c{{ loop.index }}) {
+    {% endif %}
+        {% for other_val in val_strs %}
+            {% if loop.index != outer_loop.index %}
+            _c{{ loop.index }}->waiting_reader = NULL;
+            {% endif %}
+        {% endfor %}
+{% endfor %}
+        } else {
+{% for val in val_strs %}
+            _c{{ loop.index }}->waiting_reader = NULL;
+{% endfor %}
+        }
+    }
+} while (0);
+"""
+
+def expand_select_node(func_call_node, header, generator):
+    args = func_call_node.args.exprs if (func_call_node.args and func_call_node.args.exprs) else []
+    if len(args) == 0 or len(args) % 2 != 0:
+        print(f"Error: asyncc_select_read requires an even, non-zero number of arguments (alternating channel and value pointer), found {len(args)} arguments.", file=sys.stderr)
+        sys.exit(1)
+        
+    num_chans = len(args) // 2
+    chan_strs = [generator.visit(args[2 * i]) for i in range(num_chans)]
+    val_strs = [generator.visit(args[2 * i + 1]) for i in range(num_chans)]
+
+    # Render template using Jinja2
+    template = Template(SELECT_TEMPLATE, trim_blocks=True, lstrip_blocks=True)
+    generated_code = template.render(chan_strs=chan_strs, val_strs=val_strs)
+
+    snippet_parser = c_parser.CParser()
+    dummy_func = f"{header}\nvoid __dummy(void) {{\n{generated_code}\n}}"
+    try:
+        dummy_ast = snippet_parser.parse(dummy_func)
+    except Exception as e:
+        print(f"Error parsing generated select code:\n{generated_code}\nError: {e}", file=sys.stderr)
+        raise e
+        
+    statement_node = dummy_ast.ext[-1].body.block_items[0]
+    return statement_node
+
+def expand_select_calls(node, header, generator):
+    if not isinstance(node, c_ast.Node):
+        return
+
+    for slot in node.__slots__:
+        val = getattr(node, slot)
+        if val is None:
+            continue
+        elif isinstance(val, list):
+            for i, child in enumerate(val):
+                if isinstance(child, c_ast.FuncCall) and isinstance(child.name, c_ast.ID) and (child.name.name == 'asyncc_select_read' or re.match(r'^asyncc_select_read\d+$', child.name.name)):
+                    expanded_node = expand_select_node(child, header, generator)
+                    val[i] = expanded_node
+                else:
+                    expand_select_calls(child, header, generator)
+        elif isinstance(val, c_ast.Node):
+            if isinstance(val, c_ast.FuncCall) and isinstance(val.name, c_ast.ID) and (val.name.name == 'asyncc_select_read' or re.match(r'^asyncc_select_read\d+$', val.name.name)):
+                expanded_node = expand_select_node(val, header, generator)
+                setattr(node, slot, expanded_node)
+            else:
+                expand_select_calls(val, header, generator)
 
 def transform_ast_node(node, state_names):
     if not isinstance(node, c_ast.Node):
@@ -173,6 +265,9 @@ def preprocess_code(code):
 
         param_names = [p.name for p in params]
         generator = c_generator.CGenerator()
+
+        # Expand select macros inside the function body
+        expand_select_calls(func_body, header, generator)
 
         init_args = f"{func_name}_state_t *l"
         if args_str.strip() and args_str.strip() != "void":

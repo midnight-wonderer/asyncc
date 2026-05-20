@@ -95,12 +95,9 @@ Non-blocking operations return `true` if they immediately succeed, and `false` o
 
 ## 3. Channel Select (Multiplexing)
 
-`asyncc` supports waiting on multiple channels simultaneously using select macros. It supports multiplexing from 2 to 5 channels blockingly.
+`asyncc` supports waiting on multiple channels simultaneously using the preprocessor-driven `asyncc_select_read(...)` macro, which dynamically handles an arbitrary number of channels.
 
-* `asyncc_select_read2(ch1, val1, ch2, val2)`
-* `asyncc_select_read3(ch1, val1, ch2, val2, ch3, val3)`
-* `asyncc_select_read4(...)`
-* `asyncc_select_read5(...)`
+* `asyncc_select_read(ch1, val1, ch2, val2, ...)`
 
 ### How It Works
 1. It queries each channel non-blockingly. If any channel has data ready, it copies the data, sets `l->task.woken_by` to the pointer of that channel, and continues.
@@ -123,7 +120,7 @@ asyncc asyncc_state_t selector_coroutine(void)
 
     while (1) {
         printf("Waiting for data on chan_a or chan_b...\n");
-        asyncc_select_read2(&chan_a, &val_a, &chan_b, &val_b);
+        asyncc_select_read(&chan_a, &val_a, &chan_b, &val_b);
 
         if (l->task.woken_by == &chan_a) {
             printf("Received from Chan A: %d\n", val_a);
