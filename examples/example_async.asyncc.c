@@ -2,38 +2,54 @@
 #include <stdio.h>
 #include "asyncc.h"
 
-static asyncc_chan_t my_chan;
+static asyncc_chan_t ch1;
+static asyncc_chan_t ch2;
 
-asyncc asyncc_state_t producer(int limit)
+// Static buffers for channels (no malloc)
+static int buf1[2];
+static int buf2[2];
+
+asyncc asyncc_state_t sender(void)
 {
-    int i;
+    int v1 = 10;
+    int v2 = 20;
+    int v3 = 30;
+
     asyncc_begin;
 
-    for (i = 0; i < limit; i++) {
-        printf("Producer sending: %d\n", i);
-        asyncc_chan_write(&my_chan, &i);
-        asyncc_yield;
-    }
+    printf("Sender: writing 10 to ch1 (buffered)\n");
+    asyncc_chan_write(&ch1, &v1);
 
-    printf("Producer finished.\n");
+    printf("Sender: writing 20 to ch2 (buffered)\n");
+    asyncc_chan_write(&ch2, &v2);
+
+    printf("Sender: writing 30 to ch1 (buffered)\n");
+    asyncc_chan_write(&ch1, &v3);
+
     asyncc_end;
 }
 
-asyncc asyncc_state_t consumer(void)
+asyncc asyncc_state_t receiver(void)
 {
-    int val;
+    int val1;
+    int val2;
+    int count;
+
     asyncc_begin;
 
-    while (1) {
-        asyncc_chan_read(&my_chan, &val);
-        printf("Consumer received: %d\n", val);
-        if (val >= 4) {
-            break;
+    for (count = 0; count < 3; count++) {
+        printf("Receiver: waiting on select (ch1 or ch2)...\n");
+        asyncc_select_read2(&ch1, &val1, &ch2, &val2);
+
+        if (l->task.woken_by == &ch1) {
+            printf("Receiver: received %d from ch1\n", val1);
+        } else if (l->task.woken_by == &ch2) {
+            printf("Receiver: received %d from ch2\n", val2);
         }
+        
         asyncc_yield;
     }
 
-    printf("Consumer finished.\n");
     asyncc_end;
 }
 
@@ -41,15 +57,18 @@ int main(void)
 {
     asyncc_runner_t runner;
     asyncc_runner_init(&runner);
-    asyncc_chan_init(&my_chan);
 
-    static producer_state_t p;
-    producer_init(&p, 5);
-    asyncc_runner_add(&runner, &p.task, producer_run);
+    // Initialize buffered channels with static arrays
+    asyncc_chan_init_buffered(&ch1, buf1, sizeof(int), 2);
+    asyncc_chan_init_buffered(&ch2, buf2, sizeof(int), 2);
 
-    static consumer_state_t c;
-    consumer_init(&c);
-    asyncc_runner_add(&runner, &c.task, consumer_run);
+    static sender_state_t snd;
+    sender_init(&snd);
+    asyncc_runner_add(&runner, &snd.task, sender_run);
+
+    static receiver_state_t rcv;
+    receiver_init(&rcv);
+    asyncc_runner_add(&runner, &rcv.task, receiver_run);
 
     printf("Starting runner...\n");
     while (runner.tasks_head != NULL) {

@@ -31,8 +31,8 @@
 #include <string.h>
 
 #define ASYNCC_VERSION_MAJOR    0
-#define ASYNCC_VERSION_MINOR    1
-#define ASYNCC_VERSION_PATCH    0
+#define ASYNCC_VERSION_MINOR    2
+#define ASYNCC_VERSION_PATCH    3
 
 // The asyncc decorator for the preprocessor
 #define asyncc
@@ -50,6 +50,7 @@ typedef struct asyncc_task {
     uint16_t spot;
     struct asyncc_task *next;
     bool blocked;
+    void *woken_by; // Reference to the channel/event that woke this task up
 } asyncc_task_t;
 
 typedef struct {
@@ -65,6 +66,7 @@ static inline void asyncc_runner_add(asyncc_runner_t *runner, asyncc_task_t *tas
     task->run = run;
     task->spot = ASYNCC_INIT;
     task->blocked = false;
+    task->woken_by = NULL;
     task->next = runner->tasks_head;
     runner->tasks_head = task;
 }
@@ -118,26 +120,60 @@ typedef struct {
     asyncc_task_t *waiting_writer;
     asyncc_task_t *waiting_reader;
     void *data_ptr;
+    void *buffer;
+    size_t elem_size;
+    uint16_t cap;
+    uint16_t size;
+    uint16_t head;
+    uint16_t tail;
 } asyncc_chan_t;
 
 static inline void asyncc_chan_init(asyncc_chan_t *chan) {
     chan->waiting_writer = NULL;
     chan->waiting_reader = NULL;
     chan->data_ptr = NULL;
+    chan->buffer = NULL;
+    chan->elem_size = 0;
+    chan->cap = 0;
+    chan->size = 0;
+    chan->head = 0;
+    chan->tail = 0;
+}
+
+static inline void asyncc_chan_init_buffered(asyncc_chan_t *chan, void *buffer, size_t elem_size, uint16_t cap) {
+    chan->waiting_writer = NULL;
+    chan->waiting_reader = NULL;
+    chan->data_ptr = NULL;
+    chan->buffer = buffer;
+    chan->elem_size = elem_size;
+    chan->cap = cap;
+    chan->size = 0;
+    chan->head = 0;
+    chan->tail = 0;
 }
 
 #define asyncc_chan_write(chan_ptr, val_ptr) \
     do { \
         asyncc_chan_t *_c = (chan_ptr); \
-        if (_c->waiting_reader != NULL) { \
-            memcpy(_c->data_ptr, val_ptr, sizeof(*(val_ptr))); \
+        bool _blocked = false; \
+        if (_c->waiting_reader != NULL && _c->waiting_reader->blocked) { \
+            memcpy(_c->data_ptr, val_ptr, _c->cap > 0 ? _c->elem_size : sizeof(*(val_ptr))); \
             asyncc_task_t *_reader = _c->waiting_reader; \
             _c->waiting_reader = NULL; \
             _reader->blocked = false; \
+            _reader->woken_by = _c; \
+        } else if (_c->cap > 0 && _c->size < _c->cap) { \
+            unsigned char *_buf = (unsigned char *)_c->buffer; \
+            memcpy(_buf + (_c->tail * _c->elem_size), val_ptr, _c->elem_size); \
+            _c->tail = (_c->tail + 1) % _c->cap; \
+            _c->size++; \
         } else { \
             _c->waiting_writer = (asyncc_task_t*)l; \
             _c->data_ptr = (void*)(val_ptr); \
             l->task.blocked = true; \
+            _blocked = true; \
+        } \
+        if (_blocked) { \
             asyncc_yield; \
         } \
     } while (0)
@@ -145,16 +181,112 @@ static inline void asyncc_chan_init(asyncc_chan_t *chan) {
 #define asyncc_chan_read(chan_ptr, val_ptr) \
     do { \
         asyncc_chan_t *_c = (chan_ptr); \
-        if (_c->waiting_writer != NULL) { \
-            memcpy(val_ptr, _c->data_ptr, sizeof(*(val_ptr))); \
+        bool _blocked = false; \
+        if (_c->cap > 0 && _c->size > 0) { \
+            unsigned char *_buf = (unsigned char *)_c->buffer; \
+            memcpy(val_ptr, _buf + (_c->head * _c->elem_size), _c->elem_size); \
+            _c->head = (_c->head + 1) % _c->cap; \
+            _c->size--; \
+            if (_c->waiting_writer != NULL && _c->waiting_writer->blocked) { \
+                unsigned char *_buf_w = (unsigned char *)_c->buffer; \
+                memcpy(_buf_w + (_c->tail * _c->elem_size), _c->data_ptr, _c->elem_size); \
+                _c->tail = (_c->tail + 1) % _c->cap; \
+                _c->size++; \
+                asyncc_task_t *_writer = _c->waiting_writer; \
+                _c->waiting_writer = NULL; \
+                _writer->blocked = false; \
+                _writer->woken_by = _c; \
+            } \
+        } else if (_c->waiting_writer != NULL && _c->waiting_writer->blocked) { \
+            memcpy(val_ptr, _c->data_ptr, _c->cap > 0 ? _c->elem_size : sizeof(*(val_ptr))); \
             asyncc_task_t *_writer = _c->waiting_writer; \
             _c->waiting_writer = NULL; \
             _writer->blocked = false; \
+            _writer->woken_by = _c; \
         } else { \
             _c->waiting_reader = (asyncc_task_t*)l; \
             _c->data_ptr = (void*)(val_ptr); \
             l->task.blocked = true; \
+            _blocked = true; \
+        } \
+        if (_blocked) { \
             asyncc_yield; \
+        } \
+    } while (0)
+
+// Non-blocking try operations
+static inline bool asyncc_chan_try_read(asyncc_chan_t *chan, void *val_ptr, size_t val_size) {
+    if (chan->cap > 0 && chan->size > 0) {
+        unsigned char *buf = (unsigned char *)chan->buffer;
+        memcpy(val_ptr, buf + (chan->head * chan->elem_size), chan->elem_size);
+        chan->head = (chan->head + 1) % chan->cap;
+        chan->size--;
+        if (chan->waiting_writer != NULL && chan->waiting_writer->blocked) {
+            unsigned char *buf_w = (unsigned char *)chan->buffer;
+            memcpy(buf_w + (chan->tail * chan->elem_size), chan->data_ptr, chan->elem_size);
+            chan->tail = (chan->tail + 1) % chan->cap;
+            chan->size++;
+            asyncc_task_t *writer = chan->waiting_writer;
+            chan->waiting_writer = NULL;
+            writer->blocked = false;
+            writer->woken_by = chan;
+        }
+        return true;
+    } else if (chan->waiting_writer != NULL && chan->waiting_writer->blocked) {
+        memcpy(val_ptr, chan->data_ptr, val_size);
+        asyncc_task_t *writer = chan->waiting_writer;
+        chan->waiting_writer = NULL;
+        writer->blocked = false;
+        writer->woken_by = chan;
+        return true;
+    }
+    return false;
+}
+
+static inline bool asyncc_chan_try_write(asyncc_chan_t *chan, void *val_ptr, size_t val_size) {
+    if (chan->waiting_reader != NULL && chan->waiting_reader->blocked) {
+        memcpy(chan->data_ptr, val_ptr, val_size);
+        asyncc_task_t *reader = chan->waiting_reader;
+        chan->waiting_reader = NULL;
+        reader->blocked = false;
+        reader->woken_by = chan;
+        return true;
+    } else if (chan->cap > 0 && chan->size < chan->cap) {
+        unsigned char *buf = (unsigned char *)chan->buffer;
+        memcpy(buf + (chan->tail * chan->elem_size), val_ptr, chan->elem_size);
+        chan->tail = (chan->tail + 1) % chan->cap;
+        chan->size++;
+        return true;
+    }
+    return false;
+}
+
+// -------------------------------------------------------------
+// Select Case (Waiting on multiple channels)
+// -------------------------------------------------------------
+#define asyncc_select_read2(ch1, val1, ch2, val2) \
+    do { \
+        asyncc_chan_t *_c1 = (ch1); \
+        asyncc_chan_t *_c2 = (ch2); \
+        if (asyncc_chan_try_read(_c1, val1, sizeof(*(val1)))) { \
+            l->task.woken_by = _c1; \
+        } else if (asyncc_chan_try_read(_c2, val2, sizeof(*(val2)))) { \
+            l->task.woken_by = _c2; \
+        } else { \
+            _c1->waiting_reader = (asyncc_task_t*)l; \
+            _c1->data_ptr = (void*)(val1); \
+            _c2->waiting_reader = (asyncc_task_t*)l; \
+            _c2->data_ptr = (void*)(val2); \
+            l->task.blocked = true; \
+            asyncc_yield; \
+            if (l->task.woken_by == _c1) { \
+                _c2->waiting_reader = NULL; \
+            } else if (l->task.woken_by == _c2) { \
+                _c1->waiting_reader = NULL; \
+            } else { \
+                _c1->waiting_reader = NULL; \
+                _c2->waiting_reader = NULL; \
+            } \
         } \
     } while (0)
 
