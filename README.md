@@ -116,7 +116,7 @@ int main(void)
 Before passing the code to a C compiler, run the preprocessor:
 ```bash
 python3 asyncc_preprocess.py demo.asyncc.c demo.c
-gcc demo.c -I. -o demo
+gcc demo.c asyncc.c -I. -o demo
 ./demo
 ```
 

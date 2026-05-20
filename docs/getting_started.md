@@ -77,12 +77,13 @@ A major limitation of stackless coroutines in C (like Protothreads) is that stan
 ## Build System Integration
 
 ### Using xmake
-If you are using `xmake`, you can automatically run the preprocessor by defining a target rule in your `xmake.lua`:
+If you are using `xmake`, you can automatically run the preprocessor by defining a target rule in your `xmake.lua`, and include `asyncc.c` in the sources:
 
 ```lua
 target("my_app")
     set_kind("binary")
     add_includedirs("path/to/asyncc")
+    add_files("path/to/asyncc/asyncc.c")
     
     on_load(function (target)
         local projectdir = os.projectdir()
@@ -103,7 +104,7 @@ target("my_app")
 ```
 
 ### Using a Makefile
-Alternatively, you can add a pattern rule to your Makefile:
+Alternatively, you can add a pattern rule to your Makefile and ensure `asyncc.c` is compiled and linked:
 
 ```makefile
 # Rules to build .c from .asyncc.c
@@ -111,8 +112,9 @@ build/generated/%.c: src/%.asyncc.c
 	@mkdir -p $(@D)
 	python3 asyncc_preprocess.py $< $@
 
-# Include the generated files in your source list
-SRCS = build/generated/main.c
+# Include both your generated file and asyncc.c in the source list
+SRCS = build/generated/main.c path/to/asyncc/asyncc.c
+```
 ```
 
 ---

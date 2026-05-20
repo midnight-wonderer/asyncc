@@ -5,9 +5,16 @@ set_version("0.0.1")
 -- Add include directory to all targets
 add_includedirs(".")
 
+-- Build asyncc static library
+target("asyncc")
+    set_kind("static")
+    add_files("asyncc.c")
+    add_headerfiles("asyncc.h")
+
 -- Build example1 target
 target("example1")
     set_kind("binary")
+    add_deps("asyncc")
     add_syslinks("pthread")
     on_load(function (target)
         local projectdir = os.projectdir()
@@ -28,6 +35,7 @@ target("example1")
 -- Build example_async target
 target("example_async")
     set_kind("binary")
+    add_deps("asyncc")
     on_load(function (target)
         local projectdir = os.projectdir()
         local gendir = path.join(projectdir, "build", "generated")
@@ -43,3 +51,4 @@ target("example_async")
         })
         target:add("files", dst_file)
     end)
+
