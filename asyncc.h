@@ -65,6 +65,7 @@ static inline void asyncc_runner_init(asyncc_runner_t *runner) {
 void asyncc_runner_add(asyncc_runner_t *runner, asyncc_task_t *task,
                        asyncc_state_t (*run)(asyncc_task_t *));
 void asyncc_runner_run_once(asyncc_runner_t *runner);
+bool asyncc_runner_all_blocked(const asyncc_runner_t *runner);
 
 // Coroutine Control Macros
 #define asyncc_begin                                                           \

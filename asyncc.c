@@ -26,6 +26,17 @@ void asyncc_runner_run_once(asyncc_runner_t *runner) {
   }
 }
 
+bool asyncc_runner_all_blocked(const asyncc_runner_t *runner) {
+  asyncc_task_t *curr = runner->tasks_head;
+  while (curr != NULL) {
+    if (!curr->blocked) {
+      return false;
+    }
+    curr = curr->next;
+  }
+  return true;
+}
+
 bool asyncc_chan_try_read(asyncc_chan_t *chan, void *val_ptr, size_t val_size) {
   if (chan->cap > 0 && chan->size > 0) {
     unsigned char *buf = (unsigned char *)chan->buffer;
