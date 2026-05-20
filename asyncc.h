@@ -1,7 +1,7 @@
 // @file asyncc.h
-// Async for (embedded) C
+// Zero-allocation coroutines with CSP channels
 //
-// Copyright (c) 2023 Tom Wolf
+// Copyright (c) 2026 Tom Wolf, Antigravity
 // 
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -21,162 +21,213 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 //
-//
+
 #ifndef ASYNCC_H
 #define ASYNCC_H
 
-#define ASYNCC_VERSION_MAJOR    0
-#define ASYNCC_VERSION_MINOR    0
-#define ASYNCC_VERSION_PATCH    1
+#include <stdint.h>
+#include <stdbool.h>
+#include <stddef.h>
+#include <string.h>
 
-// This macro is used as a decorator/marker for the preprocessor,
-// and resolves to nothing during normal compilation.
+#define ASYNCC_VERSION_MAJOR    0
+#define ASYNCC_VERSION_MINOR    1
+#define ASYNCC_VERSION_PATCH    0
+
+// The asyncc decorator for the preprocessor
 #define asyncc
 
-// This magic is used to allow a nice declaration of local variables in the
-// ASYNCC_BEGIN() macro (up to 10 locals, which is a reasonable limit and
-// can be easily extended with some modifications)
-#define FE_0(ACTION)
-#define FE_1(ACTION, X) ACTION(X) 
-#define FE_2(ACTION, X, ...) ACTION(X)FE_1(ACTION, __VA_ARGS__)
-#define FE_3(ACTION, X, ...) ACTION(X)FE_2(ACTION, __VA_ARGS__)
-#define FE_4(ACTION, X, ...) ACTION(X)FE_3(ACTION, __VA_ARGS__)
-#define FE_5(ACTION, X, ...) ACTION(X)FE_4(ACTION, __VA_ARGS__)
-#define FE_6(ACTION, X, ...) ACTION(X)FE_5(ACTION, __VA_ARGS__)
-#define FE_7(ACTION, X, ...) ACTION(X)FE_6(ACTION, __VA_ARGS__)
-#define FE_8(ACTION, X, ...) ACTION(X)FE_7(ACTION, __VA_ARGS__)
-#define FE_9(ACTION, X, ...) ACTION(X)FE_8(ACTION, __VA_ARGS__)
-#define FE_10(ACTION, X, ...) ACTION(X)FE_9(ACTION, __VA_ARGS__)
-
-#define GET_MACRO(_0,_1,_2,_3,_4,_5,_6,_7,_8,_9,_10,NAME,...) NAME 
-#define FOR_EACH(ACTION,...) \
-  GET_MACRO(_0,__VA_ARGS__,FE_10,FE_9,FE_8,FE_7,FE_6,FE_5,FE_4,FE_3,FE_2,FE_1,FE_0)(ACTION,__VA_ARGS__)
-
-// Some actions
-#define L_DEFINE(X)     X;
-#define L_DEFINES(...) FOR_EACH(L_DEFINE,__VA_ARGS__)
-
-enum asyncc_state {
+typedef enum {
     ASYNCC_INIT,
-    ASYNCC_CONT = ASYNCC_INIT,
-    ASYNCC_ERR,
+    ASYNCC_CONT,
     ASYNCC_DONE,
-};
+} asyncc_state_t;
 
-// IDEA: provide a #define to disable all stack bounds checking (scary)
+struct asyncc_task;
 
-// Simplest way to provide local state is to expand it to a local struct, point
-// it to the top of the stack, and advance the stack index by sizeof(struct)
+typedef struct asyncc_task {
+    asyncc_state_t (*run)(struct asyncc_task *self);
+    uint16_t spot;
+    struct asyncc_task *next;
+    bool blocked;
+} asyncc_task_t;
 
-#ifdef LIVE_DANGEROUSLY
+typedef struct {
+    asyncc_task_t *tasks_head;
+} asyncc_runner_t;
 
-// Init stack index and initial spot within function (no len, live dangerously)
-#define asyncc_init(s, len)              \
-        *((uint16_t*)s+0) = 2;          \
-        *((uint16_t*)s+1) = ASYNCC_INIT
+// Runner APIs
+static inline void asyncc_runner_init(asyncc_runner_t *runner) {
+    runner->tasks_head = NULL;
+}
 
-#define ASYNCC_BEGIN(s, ...)                                         \
-    uint16_t *s_idx = (uint16_t*)(s);                               \
-    struct locals { L_DEFINES(uint16_t spot, __VA_ARGS__) } *l;     \
-    l = (struct locals*)(s + *s_idx);                               \
-    *s_idx += sizeof(struct locals);                                \
-    switch (l->spot) { default:
+static inline void asyncc_runner_add(asyncc_runner_t *runner, asyncc_task_t *task, asyncc_state_t (*run)(asyncc_task_t*)) {
+    task->run = run;
+    task->spot = ASYNCC_INIT;
+    task->blocked = false;
+    task->next = runner->tasks_head;
+    runner->tasks_head = task;
+}
 
-#define asyncc_begin(s, ...) ASYNCC_BEGIN(s, __VA_ARGS__)
+static inline void asyncc_runner_run_once(asyncc_runner_t *runner) {
+    asyncc_task_t **curr = &runner->tasks_head;
+    while (*curr != NULL) {
+        asyncc_task_t *task = *curr;
+        if (!task->blocked) {
+            asyncc_state_t state = task->run(task);
+            if (state == ASYNCC_DONE) {
+                // Remove task from active list
+                *curr = task->next;
+                continue;
+            }
+        }
+        curr = &(*curr)->next;
+    }
+}
 
-#else
+// Coroutine Control Macros
+#define asyncc_begin \
+    switch (l->task.spot) { default:
 
-// Init stack index, max length, and initial spot within function
-#define asyncc_init(s, len)              \
-        *((uint16_t*)s+0) = 4;          \
-        *((uint16_t*)s+1) = len;        \
-        *((uint16_t*)s+2) = ASYNCC_INIT
+#define asyncc_end \
+    l->task.spot = ASYNCC_DONE; return ASYNCC_DONE; }
 
-#define asyncc_begin(s, ...)                                         \
-    uint16_t *s_idx = (uint16_t*)(s);                               \
-    uint16_t *s_max = (uint16_t*)(s)+1;                             \
-    struct locals { L_DEFINES(uint16_t spot, __VA_ARGS__) } *l;     \
-    if ((*s_idx + sizeof(struct locals)) > *s_max) {                \
-        asyncc_err(s, sizeof(struct locals));                        \
-        return ASYNCC_ERR;                                           \
-    } else {                                                        \
-        l = (struct locals*)(s + *s_idx);                           \
-        a_push();                                                   \
-        switch (l->spot) { default:
+#define asyncc_yield \
+    do { \
+        l->task.spot = __LINE__; \
+        return ASYNCC_CONT; \
+        case __LINE__:; \
+    } while (0)
 
-#define ASYNCC_BEGIN(s, ...) asyncc_begin(s, __VA_ARGS__)
+#define await_while(cond) \
+    do { \
+        l->task.spot = __LINE__; \
+        case __LINE__: \
+        if (cond) { \
+            return ASYNCC_CONT; \
+        } \
+    } while (0)
 
-#endif
-
-#define a_push() *s_idx+=sizeof(struct locals)
-#define a_pop()  *s_idx-=sizeof(struct locals)
-
-#define asyncc_end(s) case ASYNCC_DONE: a_pop(); return ASYNCC_DONE; } }
-
-#define await_while(cond) l->spot = __LINE__; case __LINE__:if (cond) { a_pop(); return ASYNCC_CONT; }
 #define await(cond) await_while(!(cond))
 
 
-#define asyncc_yield l->spot = __LINE__; a_pop(); return ASYNCC_CONT; case __LINE__:
-#define asyncc_exit l->spot = ASYNCC_DONE; a_pop(); return ASYNCC_DONE
+// -------------------------------------------------------------
+// CSP Channels (Intra-Runner Communication)
+// -------------------------------------------------------------
+typedef struct {
+    asyncc_task_t *waiting_writer;
+    asyncc_task_t *waiting_reader;
+    void *data_ptr;
+} asyncc_chan_t;
 
-// For those who don't like dereferencing struct members so much:
-#define _(v) l->v
+static inline void asyncc_chan_init(asyncc_chan_t *chan) {
+    chan->waiting_writer = NULL;
+    chan->waiting_reader = NULL;
+    chan->data_ptr = NULL;
+}
 
-// Helpers to get stack index, max len, and current spot
-#define IDX(s)  *((uint16_t*)s+0)
-
-#ifdef LIVE_DANGEROUSLY
-#define SPOT(s) *((uint16_t*)s+1)
-#else
-#define MAX(s)  *((uint16_t*)s+1)
-#define SPOT(s) *((uint16_t*)s+2)
-#endif
-
-#define asyncc_done(s) SPOT(s) = ASYNCC_DONE
-#define asyncc_is_done(s) (SPOT(s) == ASYNCC_DONE)
-#define asyncc_call(f, s) (asyncc_is_done(s) || (f)(s))
-
-// Gets the 8-bit stack value for printing
-#define SVAL(s,idx) *((uint8_t*)s+idx)
-
-// Print the contents of the stack (for debugging)
-#define print_stack(s)                      \
-    printf("STACKDUMP: %s(): line %d\n", __FUNCTION__, __LINE__);   \
-    printf("  STACK: %s (%p)\n", #s, s);                            \
-    printf("  IDX: 0x%04X (%d),  SIZE: 0x%04X (%d)\n",              \
-            IDX(s), IDX(s), MAX(s), MAX(s));                        \
-    printf("  SPOT: %d \n", SPOT(s));                               \
-    printf("    MEMORY: | ");                                       \
-    for (int i=0; i<0x10; i++) {                                    \
-        printf("0x%02X ", i);                                       \
-    }                                                               \
-    printf("\n    ");                                               \
-    for (int i=0; i<0x11; i++) {                                    \
-        printf("-----");                                            \
-    }                                                               \
-    printf("\n");                                                   \
-    for (int row=0; (row * 0x10) < MAX(s); row++) {                 \
-        printf("    0x%04X: | ", row*0x10);                         \
-        for (int i=row*0x10; (i<row*0x10+0x10) && i<MAX(s); i++) {  \
-            printf("0x%02X ", SVAL(s,i));                           \
-        }                                                           \
-        printf("\n");                                               \
-    }
-
-
-
-// Counting semaphores support
-struct asyncc_sem {
-    unsigned int count;
-};
-
-#define asyncc_sem_init(sem, val) (sem)->count = (val)
-#define await_sem(sem)           \
-    do {                         \
-        await((sem)->count > 0); \
-        --(sem)->count;          \
+#define asyncc_chan_write(chan_ptr, val_ptr) \
+    do { \
+        asyncc_chan_t *_c = (chan_ptr); \
+        if (_c->waiting_reader != NULL) { \
+            memcpy(_c->data_ptr, val_ptr, sizeof(*(val_ptr))); \
+            asyncc_task_t *_reader = _c->waiting_reader; \
+            _c->waiting_reader = NULL; \
+            _reader->blocked = false; \
+        } else { \
+            _c->waiting_writer = (asyncc_task_t*)l; \
+            _c->data_ptr = (void*)(val_ptr); \
+            l->task.blocked = true; \
+            asyncc_yield; \
+        } \
     } while (0)
-#define asyncc_sem_signal(sem)    ++(sem)->count
+
+#define asyncc_chan_read(chan_ptr, val_ptr) \
+    do { \
+        asyncc_chan_t *_c = (chan_ptr); \
+        if (_c->waiting_writer != NULL) { \
+            memcpy(val_ptr, _c->data_ptr, sizeof(*(val_ptr))); \
+            asyncc_task_t *_writer = _c->waiting_writer; \
+            _c->waiting_writer = NULL; \
+            _writer->blocked = false; \
+        } else { \
+            _c->waiting_reader = (asyncc_task_t*)l; \
+            _c->data_ptr = (void*)(val_ptr); \
+            l->task.blocked = true; \
+            asyncc_yield; \
+        } \
+    } while (0)
+
+
+// -------------------------------------------------------------
+// Thread Gate (Inter-Thread Communication Integration hooks)
+// -------------------------------------------------------------
+typedef struct {
+    asyncc_task_t *waiting_task;
+    volatile bool event_triggered;
+    void (*notify_callback)(void *context);
+    void *notify_context;
+    void *data;
+} asyncc_gate_t;
+
+static inline void asyncc_gate_init(asyncc_gate_t *gate) {
+    gate->waiting_task = NULL;
+    gate->event_triggered = false;
+    gate->notify_callback = NULL;
+    gate->notify_context = NULL;
+    gate->data = NULL;
+}
+
+#define asyncc_gate_wait(gate_ptr, val_ptr) \
+    do { \
+        asyncc_gate_t *_g = (gate_ptr); \
+        _g->waiting_task = (asyncc_task_t*)l; \
+        _g->data = (void*)(val_ptr); \
+        _g->event_triggered = false; \
+        l->task.blocked = true; \
+        asyncc_yield; \
+    } while (0)
+
+static inline void asyncc_gate_signal(asyncc_gate_t *gate, void *val_ptr, size_t val_size) {
+    if (gate->data != NULL && val_ptr != NULL) {
+        memcpy(gate->data, val_ptr, val_size);
+    }
+    gate->event_triggered = true;
+    asyncc_task_t *task = gate->waiting_task;
+    if (task != NULL) {
+        task->blocked = false;
+        gate->waiting_task = NULL;
+    }
+    if (gate->notify_callback != NULL) {
+        gate->notify_callback(gate->notify_context);
+    }
+}
+
+#define asyncc_gate_send(gate_ptr, val_ptr) \
+    do { \
+        asyncc_gate_t *_g = (gate_ptr); \
+        _g->waiting_task = (asyncc_task_t*)l; \
+        _g->data = (void*)(val_ptr); \
+        _g->event_triggered = false; \
+        l->task.blocked = true; \
+        if (_g->notify_callback != NULL) { \
+            _g->notify_callback(_g->notify_context); \
+        } \
+        asyncc_yield; \
+    } while (0)
+
+static inline bool asyncc_gate_retrieve(asyncc_gate_t *gate, void *val_ptr, size_t val_size) {
+    if (gate->waiting_task != NULL && gate->data != NULL) {
+        if (val_ptr != NULL) {
+            memcpy(val_ptr, gate->data, val_size);
+        }
+        asyncc_task_t *task = gate->waiting_task;
+        gate->waiting_task = NULL;
+        gate->data = NULL;
+        task->blocked = false;
+        return true;
+    }
+    return false;
+}
 
 #endif // ASYNCC_H

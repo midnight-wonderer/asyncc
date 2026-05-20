@@ -28,7 +28,8 @@ def parse_with_auto_typedefs(code_to_parse):
     custom_types.update([
         "uint8_t", "uint16_t", "uint32_t", "uint64_t",
         "int8_t", "int16_t", "int32_t", "int64_t",
-        "size_t"
+        "size_t", "asyncc_task_t", "asyncc_state_t",
+        "asyncc_chan_t", "asyncc_gate_t"
     ])
 
     error_pattern = re.compile(r'(?:([^:]+):)?(\d+):(\d+):\s*(.*)')
@@ -75,7 +76,7 @@ def parse_with_auto_typedefs(code_to_parse):
 
             custom_types.add(candidate)
 
-def transform_ast_node(node, local_names, stack_name):
+def transform_ast_node(node, state_names):
     if not isinstance(node, c_ast.Node):
         return
 
@@ -86,7 +87,7 @@ def transform_ast_node(node, local_names, stack_name):
         elif isinstance(val, list):
             for i, child in enumerate(val):
                 if isinstance(child, c_ast.ID):
-                    if child.name in local_names:
+                    if child.name in state_names:
                         struct_ref = c_ast.StructRef(
                             name=c_ast.ID(name='l'),
                             type='->',
@@ -94,18 +95,11 @@ def transform_ast_node(node, local_names, stack_name):
                             coord=child.coord
                         )
                         val[i] = struct_ref
-                    elif child.name == 'asyncc_end':
-                        func_call = c_ast.FuncCall(
-                            name=c_ast.ID(name='asyncc_end', coord=child.coord),
-                            args=c_ast.ExprList(exprs=[c_ast.ID(name=stack_name, coord=child.coord)], coord=child.coord),
-                            coord=child.coord
-                        )
-                        val[i] = func_call
                 else:
-                    transform_ast_node(child, local_names, stack_name)
+                    transform_ast_node(child, state_names)
         elif isinstance(val, c_ast.Node):
             if isinstance(val, c_ast.ID):
-                if val.name in local_names:
+                if val.name in state_names:
                     is_struct_field = (isinstance(node, c_ast.StructRef) and slot == 'field')
                     if not is_struct_field:
                         struct_ref = c_ast.StructRef(
@@ -115,22 +109,14 @@ def transform_ast_node(node, local_names, stack_name):
                             coord=val.coord
                         )
                         setattr(node, slot, struct_ref)
-                elif val.name == 'asyncc_end':
-                    func_call = c_ast.FuncCall(
-                        name=c_ast.ID(name='asyncc_end', coord=val.coord),
-                        args=c_ast.ExprList(exprs=[c_ast.ID(name=stack_name, coord=val.coord)], coord=val.coord),
-                        coord=val.coord
-                    )
-                    setattr(node, slot, func_call)
             else:
-                transform_ast_node(val, local_names, stack_name)
+                transform_ast_node(val, state_names)
 
 def preprocess_code(code):
     # Regex to find async functions:
-    # Matches: asyncc enum asyncc_state <func_name> (<args>) {
-    # Captures: function name, arguments list, and body
+    # Matches: asyncc <type> <func_name> (<args>) {
     async_func_pattern = re.compile(
-        r'asyncc\s+(enum\s+asyncc_state\s+(\w+)\s*\(([^)]*)\))\s*\{',
+        r'asyncc\s+((enum\s+asyncc_state|asyncc_state_t)\s+(\w+)\s*\(([^)]*)\))\s*\{',
         re.MULTILINE
     )
 
@@ -140,9 +126,8 @@ def preprocess_code(code):
         if not match:
             break
 
-        full_decl = match.group(1) # "enum asyncc_state func_name(args)"
-        func_name = match.group(2)
-        args_str = match.group(3)
+        func_name = match.group(3)
+        args_str = match.group(4)
         start_idx = match.end()
 
         # Find the matching closing brace for the function body
@@ -162,13 +147,8 @@ def preprocess_code(code):
 
         body = code[start_idx:end_idx - 1]
 
-        # Extract the stack variable name from arguments
-        # Typically the first argument is "uint8_t *s" or similar
-        stack_match = re.search(r'uint8_t\s*\*\s*([a-zA-Z_][a-zA-Z0-9_]*)', args_str)
-        stack_name = stack_match.group(1) if stack_match else 's'
-
         # Construct a valid C function to parse
-        clean_func = f"{full_decl}\n{{{body}}}"
+        clean_func = f"asyncc_state_t {func_name}({args_str})\n{{{body}}}"
 
         # Parse the function definition
         try:
@@ -180,6 +160,27 @@ def preprocess_code(code):
         # Extract the function body node
         func_def = ast.ext[-1]
         func_body = func_def.body
+
+        # Parse parameters
+        func_decl = func_def.decl.type
+        params = []
+        if func_decl.args is not None:
+            for p in func_decl.args.params:
+                # If parameter has no name or is void, skip
+                if not p.name or (isinstance(p.type, c_ast.TypeDecl) and isinstance(p.type.type, c_ast.IdentifierType) and p.type.type.names == ['void']):
+                    continue
+                params.append(p)
+
+        param_names = [p.name for p in params]
+        generator = c_generator.CGenerator()
+
+        init_args = f"{func_name}_state_t *l"
+        if args_str.strip() and args_str.strip() != "void":
+            init_args += f", {args_str}"
+
+        init_body = []
+        for p in params:
+            init_body.append(f"    l->{p.name} = {p.name};")
 
         # Locate declarations before asyncc_begin
         local_decls = []
@@ -198,15 +199,14 @@ def preprocess_code(code):
             continue
 
         local_names = set(decl.name for decl in local_decls)
+        state_names = set(param_names) | local_names
         locals_list = []
         initializers = []
-
-        generator = c_generator.CGenerator()
 
         # Transform local variable initializers
         for decl in local_decls:
             if decl.init is not None:
-                transform_ast_node(decl.init, local_names, stack_name)
+                transform_ast_node(decl.init, state_names)
                 init_str = f"l->{decl.name} = {generator.visit(decl.init)};"
                 initializers.append(init_str)
             
@@ -215,11 +215,24 @@ def preprocess_code(code):
             locals_list.append(decl_str)
 
         # Transform the rest of the body to replace references with l->var
-        transform_ast_node(func_body, local_names, stack_name)
+        transform_ast_node(func_body, state_names)
+
+        # Generate struct locals definition
+        struct_decl = f"typedef struct {{\n    asyncc_task_t task;\n"
+        for p in params:
+            struct_decl += f"    {generator.visit(p)};\n"
+        for decl_str in locals_list:
+            struct_decl += f"    {decl_str};\n"
+        struct_decl += f"}} {func_name}_state_t;"
+
+        # Generate init function
+        init_decl = f"static inline void {func_name}_init({init_args}) {{\n"
+        for init_line in init_body:
+            init_decl += f"{init_line}\n"
+        init_decl += "}"
 
         # Format the asyncc_begin call
-        locals_args = ", ".join(locals_list)
-        begin_replacement = f"    asyncc_begin({stack_name}, {locals_args});"
+        begin_replacement = f"    asyncc_begin;"
         if initializers:
             begin_replacement += "\n    " + "\n    ".join(initializers)
 
@@ -232,7 +245,16 @@ def preprocess_code(code):
         lines = compound_code.splitlines()
         body_content = "\n".join(lines[1:-1])
 
-        transformed_func = f"{full_decl}\n{{\n{begin_replacement}\n{body_content}\n}}"
+        transformed_func = (
+            f"{struct_decl}\n\n"
+            f"{init_decl}\n\n"
+            f"asyncc_state_t {func_name}_run(asyncc_task_t *self)\n"
+            f"{{\n"
+            f"    {func_name}_state_t *l = ({func_name}_state_t*)self;\n"
+            f"{begin_replacement}\n"
+            f"{body_content}\n"
+            f"}}"
+        )
 
         # Replace in original code
         code = code[:match.start()] + transformed_func + code[end_idx:]
