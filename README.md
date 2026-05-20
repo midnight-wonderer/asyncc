@@ -112,8 +112,8 @@ enum async example(uint8_t *s)
     // created in the begin macro like any other "local" variable (see above).
     // Also, note that we only need to allocate a new "sub-stack" for every
     // additional "simultaneous" async thread.
-    await(some_func(s) & some_func(l->s1));     // Wait until one completes
-    await(some_func(s) | some_func(l->s1));     // Wait until all complete
+    await(some_func(s) | some_func(l->s1));     // Wait until one completes
+    await(some_func(s) & some_func(l->s1));     // Wait until all complete
 
     // But it may be easier to keep it explicit when playing with parallel
     // sub-functions.

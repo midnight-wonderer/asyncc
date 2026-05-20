@@ -92,7 +92,6 @@ enum async {
     struct locals { L_DEFINES(uint16_t spot, __VA_ARGS__) } *l;     \
     if ((*s_idx + sizeof(struct locals)) > *s_max) {                \
         async_err(s, sizeof(struct locals));                        \
-        a_pop();                                                    \
         return ASYNC_ERR;                                           \
     } else {                                                        \
         l = (struct locals*)(s + *s_idx);                           \
