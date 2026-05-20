@@ -50,3 +50,13 @@ modules.order
 Module.symvers
 Mkfile.old
 dkms.conf
+
+# Xmake directories
+.xmake/
+build/
+
+# Generated files and binaries
+example_async
+examples/example_async.c
+example-small
+example1
