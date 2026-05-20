@@ -137,26 +137,10 @@ static inline void asyncc_chan_init_buffered(asyncc_chan_t *chan, void *buffer,
 #define asyncc_chan_write(chan_ptr, val_ptr)                                   \
   do {                                                                         \
     asyncc_chan_t *_c = (chan_ptr);                                            \
-    bool _blocked = false;                                                     \
-    if (_c->waiting_reader != NULL && _c->waiting_reader->blocked) {           \
-      memcpy(_c->data_ptr, val_ptr,                                            \
-             _c->cap > 0 ? _c->elem_size : sizeof(*(val_ptr)));                \
-      asyncc_task_t *_reader = _c->waiting_reader;                             \
-      _c->waiting_reader = NULL;                                               \
-      _reader->blocked = false;                                                \
-      _reader->woken_by = _c;                                                  \
-    } else if (_c->cap > 0 && _c->size < _c->cap) {                            \
-      unsigned char *_buf = (unsigned char *)_c->buffer;                       \
-      memcpy(_buf + (_c->tail * _c->elem_size), val_ptr, _c->elem_size);       \
-      _c->tail = (_c->tail + 1) % _c->cap;                                     \
-      _c->size++;                                                              \
-    } else {                                                                   \
+    if (!asyncc_chan_try_write(_c, (void *)(val_ptr), sizeof(*(val_ptr)))) {   \
       _c->waiting_writer = (asyncc_task_t *)l;                                 \
       _c->data_ptr = (void *)(val_ptr);                                        \
       l->task.blocked = true;                                                  \
-      _blocked = true;                                                         \
-    }                                                                          \
-    if (_blocked) {                                                            \
       asyncc_yield;                                                            \
     }                                                                          \
   } while (0)
@@ -164,37 +148,10 @@ static inline void asyncc_chan_init_buffered(asyncc_chan_t *chan, void *buffer,
 #define asyncc_chan_read(chan_ptr, val_ptr)                                    \
   do {                                                                         \
     asyncc_chan_t *_c = (chan_ptr);                                            \
-    bool _blocked = false;                                                     \
-    if (_c->cap > 0 && _c->size > 0) {                                         \
-      unsigned char *_buf = (unsigned char *)_c->buffer;                       \
-      memcpy(val_ptr, _buf + (_c->head * _c->elem_size), _c->elem_size);       \
-      _c->head = (_c->head + 1) % _c->cap;                                     \
-      _c->size--;                                                              \
-      if (_c->waiting_writer != NULL && _c->waiting_writer->blocked) {         \
-        unsigned char *_buf_w = (unsigned char *)_c->buffer;                   \
-        memcpy(_buf_w + (_c->tail * _c->elem_size), _c->data_ptr,              \
-               _c->elem_size);                                                 \
-        _c->tail = (_c->tail + 1) % _c->cap;                                   \
-        _c->size++;                                                            \
-        asyncc_task_t *_writer = _c->waiting_writer;                           \
-        _c->waiting_writer = NULL;                                             \
-        _writer->blocked = false;                                              \
-        _writer->woken_by = _c;                                                \
-      }                                                                        \
-    } else if (_c->waiting_writer != NULL && _c->waiting_writer->blocked) {    \
-      memcpy(val_ptr, _c->data_ptr,                                            \
-             _c->cap > 0 ? _c->elem_size : sizeof(*(val_ptr)));                \
-      asyncc_task_t *_writer = _c->waiting_writer;                             \
-      _c->waiting_writer = NULL;                                               \
-      _writer->blocked = false;                                                \
-      _writer->woken_by = _c;                                                  \
-    } else {                                                                   \
+    if (!asyncc_chan_try_read(_c, (void *)(val_ptr), sizeof(*(val_ptr)))) {    \
       _c->waiting_reader = (asyncc_task_t *)l;                                 \
       _c->data_ptr = (void *)(val_ptr);                                        \
       l->task.blocked = true;                                                  \
-      _blocked = true;                                                         \
-    }                                                                          \
-    if (_blocked) {                                                            \
       asyncc_yield;                                                            \
     }                                                                          \
   } while (0)

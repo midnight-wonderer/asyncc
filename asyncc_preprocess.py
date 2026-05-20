@@ -4,6 +4,23 @@ import re
 from pycparser import c_parser, c_ast, c_generator
 from jinja2 import Template
 
+
+def main():
+    if len(sys.argv) < 3:
+        print("Usage: asyncc_preprocess.py <input_file> <output_file>")
+        sys.exit(1)
+
+    input_file = sys.argv[1]
+    output_file = sys.argv[2]
+
+    with open(input_file, 'r') as f:
+        content = f.read()
+
+    processed_content = preprocess_code(content)
+
+    with open(output_file, 'w') as f:
+        f.write(processed_content)
+
 def strip_comments_preserving_lines(text):
     def replacer(match):
         s = match.group(0)
@@ -359,21 +376,6 @@ def preprocess_code(code):
 
     return code
 
-def main():
-    if len(sys.argv) < 3:
-        print("Usage: asyncc_preprocess.py <input_file> <output_file>")
-        sys.exit(1)
-
-    input_file = sys.argv[1]
-    output_file = sys.argv[2]
-
-    with open(input_file, 'r') as f:
-        content = f.read()
-
-    processed_content = preprocess_code(content)
-
-    with open(output_file, 'w') as f:
-        f.write(processed_content)
-
 if __name__ == '__main__':
     main()
+
