@@ -138,6 +138,33 @@ do {
 } while (0);
 """
 
+COROUTINE_TEMPLATE = """\
+typedef struct {
+    asyncc_task_t task;
+{% for p_decl in param_decls %}
+    {{ p_decl }};
+{% endfor %}
+{% for local_decl in local_decls %}
+    {{ local_decl }};
+{% endfor %}
+} {{ func_name }}_state_t;
+
+static inline void {{ func_name }}_init({{ init_args }}) {
+{% for init_line in init_body %}
+{{ init_line }}
+{% endfor %}
+}
+
+asyncc_state_t {{ func_name }}_run(asyncc_task_t *self)
+{
+    {{ func_name }}_state_t *l = ({{ func_name }}_state_t*)self;
+    asyncc_begin;
+{% for initializer in initializers %}
+    {{ initializer }}
+{% endfor %}
+{{ body_content }}
+}"""
+
 def expand_select_node(func_call_node, header, generator):
     args = func_call_node.args.exprs if (func_call_node.args and func_call_node.args.exprs) else []
     if len(args) == 0 or len(args) % 2 != 0:
@@ -329,24 +356,8 @@ def preprocess_code(code):
         # Transform the rest of the body to replace references with l->var
         transform_ast_node(func_body, state_names)
 
-        # Generate struct locals definition
-        struct_decl = f"typedef struct {{\n    asyncc_task_t task;\n"
-        for p in params:
-            struct_decl += f"    {generator.visit(p)};\n"
-        for decl_str in locals_list:
-            struct_decl += f"    {decl_str};\n"
-        struct_decl += f"}} {func_name}_state_t;"
-
-        # Generate init function
-        init_decl = f"static inline void {func_name}_init({init_args}) {{\n"
-        for init_line in init_body:
-            init_decl += f"{init_line}\n"
-        init_decl += "}"
-
-        # Format the asyncc_begin call
-        begin_replacement = f"    asyncc_begin;"
-        if initializers:
-            begin_replacement += "\n    " + "\n    ".join(initializers)
+        param_decls = [generator.visit(p) for p in params]
+        local_decls = locals_list
 
         # Format remaining statements using Compound formatting
         remaining_items = func_body.block_items[async_begin_idx + 1:]
@@ -357,15 +368,16 @@ def preprocess_code(code):
         lines = compound_code.splitlines()
         body_content = "\n".join(lines[1:-1])
 
-        transformed_func = (
-            f"{struct_decl}\n\n"
-            f"{init_decl}\n\n"
-            f"asyncc_state_t {func_name}_run(asyncc_task_t *self)\n"
-            f"{{\n"
-            f"    {func_name}_state_t *l = ({func_name}_state_t*)self;\n"
-            f"{begin_replacement}\n"
-            f"{body_content}\n"
-            f"}}"
+        # Render the coroutine structure template using Jinja2
+        coroutine_tmpl = Template(COROUTINE_TEMPLATE, trim_blocks=True, lstrip_blocks=True)
+        transformed_func = coroutine_tmpl.render(
+            func_name=func_name,
+            param_decls=param_decls,
+            local_decls=local_decls,
+            init_args=init_args,
+            init_body=init_body,
+            initializers=initializers,
+            body_content=body_content
         )
 
         # Replace in original code
