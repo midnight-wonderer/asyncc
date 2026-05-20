@@ -53,9 +53,9 @@ To learn more, check out the dedicated documentation files:
 ## 🏁 Quick Start
 
 ### 1. Requirements
-Ensure you have Python 3 and the `pycparser` package installed to run the preprocessor:
+Ensure you have Python 3 and the required dependencies installed to run the preprocessor:
 ```bash
-pip install pycparser
+pip install -r requirements.txt
 ```
 
 ### 2. Write a Coroutine (`demo.asyncc.c`)

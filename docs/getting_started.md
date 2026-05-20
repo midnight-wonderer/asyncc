@@ -19,13 +19,13 @@ Unlike standard C programs that require heavy RTOS threads (each with its own st
 To compile and run `asyncc` projects, you need:
 - **C Compiler**: Any standard-compliant C99 (or newer) compiler (e.g., GCC, Clang, MSVC).
 - **Python 3.x**: Required for the compile-time preprocessor.
-- **pycparser**: The preprocessor uses `pycparser` to parse and analyze your C code.
+- **Python Packages**: The preprocessor requires `pycparser` (to parse and analyze C code) and `jinja2` (for templating).
 
 ### Installing Python Dependencies
 
-Install `pycparser` using `pip`:
+Install the required packages from the project root using `pip`:
 ```bash
-pip install pycparser
+pip install -r requirements.txt
 ```
 
 ---
