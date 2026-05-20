@@ -38,11 +38,11 @@
 #define FE_3(ACTION, X, ...) ACTION(X)FE_2(ACTION, __VA_ARGS__)
 #define FE_4(ACTION, X, ...) ACTION(X)FE_3(ACTION, __VA_ARGS__)
 #define FE_5(ACTION, X, ...) ACTION(X)FE_4(ACTION, __VA_ARGS__)
-#define FE_6(ACTION, X, ...) ACTION(X)FE_4(ACTION, __VA_ARGS__)
-#define FE_7(ACTION, X, ...) ACTION(X)FE_4(ACTION, __VA_ARGS__)
-#define FE_8(ACTION, X, ...) ACTION(X)FE_4(ACTION, __VA_ARGS__)
-#define FE_9(ACTION, X, ...) ACTION(X)FE_4(ACTION, __VA_ARGS__)
-#define FE_10(ACTION, X, ...) ACTION(X)FE_4(ACTION, __VA_ARGS__)
+#define FE_6(ACTION, X, ...) ACTION(X)FE_5(ACTION, __VA_ARGS__)
+#define FE_7(ACTION, X, ...) ACTION(X)FE_6(ACTION, __VA_ARGS__)
+#define FE_8(ACTION, X, ...) ACTION(X)FE_7(ACTION, __VA_ARGS__)
+#define FE_9(ACTION, X, ...) ACTION(X)FE_8(ACTION, __VA_ARGS__)
+#define FE_10(ACTION, X, ...) ACTION(X)FE_9(ACTION, __VA_ARGS__)
 
 #define GET_MACRO(_0,_1,_2,_3,_4,_5,_6,_7,_8,_9,_10,NAME,...) NAME 
 #define FOR_EACH(ACTION,...) \
