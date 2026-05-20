@@ -78,6 +78,8 @@ enum async {
     *s_idx += sizeof(struct locals);                                \
     switch (l->spot) { default:
 
+#define async_begin(s, ...) ASYNC_BEGIN(s, __VA_ARGS__)
+
 #else
 
 // Init stack index, max length, and initial spot within function
@@ -98,14 +100,14 @@ enum async {
         a_push();                                                   \
         switch (l->spot) { default:
 
+#define ASYNC_BEGIN(s, ...) async_begin(s, __VA_ARGS__)
+
 #endif
 
 #define a_push() *s_idx+=sizeof(struct locals)
 #define a_pop()  *s_idx-=sizeof(struct locals)
 
 #define async_end(s) case ASYNC_DONE: a_pop(); return ASYNC_DONE; } }
-
-#define async_done(s) *((uint16_t*)s+2) = ASYNC_DONE
 
 #define await_while(cond) l->spot = __LINE__; case __LINE__:if (cond) { a_pop(); return ASYNC_CONT; }
 #define await(cond) await_while(!(cond))
@@ -119,8 +121,15 @@ enum async {
 
 // Helpers to get stack index, max len, and current spot
 #define IDX(s)  *((uint16_t*)s+0)
+
+#ifdef LIVE_DANGEROUSLY
+#define SPOT(s) *((uint16_t*)s+1)
+#else
 #define MAX(s)  *((uint16_t*)s+1)
 #define SPOT(s) *((uint16_t*)s+2)
+#endif
+
+#define async_done(s) SPOT(s) = ASYNC_DONE
 
 // Gets the 8-bit stack value for printing
 #define SVAL(s,idx) *((uint8_t*)s+idx)
